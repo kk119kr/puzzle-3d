@@ -128,7 +128,7 @@ html,body{margin:0;height:100%;overflow:hidden;background:var(--bg);color:var(--
 </div></div>
 
 <div id="pop" class="overlay hidden"><div class="card">
-  <span style="display:inline-block;background:var(--gold);color:#1a1405;font-weight:800;font-size:12px;border-radius:20px;padding:3px 10px">결합 3개 달성!</span>
+  <span style="display:inline-block;background:var(--gold);color:#1a1405;font-weight:800;font-size:12px;border-radius:20px;padding:3px 10px"><b id="popN">3</b>개 결합 달성!</span>
   <p>잠깐 쉬어가세요. 추천 상품 구경하고 가세요.</p>
   <div id="popBanner" class="bn"></div>
   <div class="close-row"><button class="sub2" id="popX">닫고 계속하기</button></div>
@@ -488,7 +488,7 @@ function refresh(){
   ['bMove','bLift','bRot'].forEach(function(id){$('#'+id).classList.toggle('on',({bMove:'move',bLift:'lift',bRot:'rot'})[id]===mode)});
   var has=!!sel&&sel.state==='scene';
   ['#bY90','#bFlip','#bOut'].forEach(function(id){$(id).disabled=!has});
-  if(stage===2&&!G.popped&&!G.won&&!drag&&an.ok>=3){G.popped=true;showPop()}
+  var popAt=stage===1?5:3;if(!G.popped&&!G.won&&!drag&&an.ok>=popAt){G.popped=true;$('#popN').textContent=popAt;showPop()}
   if(showConf&&!G.won&&an.full)win();
 }
 var toastT;
@@ -506,7 +506,8 @@ function win(){
   $('#winH').textContent=stage===1?'1탄 CLEAR':'2탄 CLEAR';
   $('#wNext').textContent=stage===1?'2탄 도전':'1탄 다시하기';
   $('#pop').classList.add('hidden');
-  setTimeout(function(){mountBanner('#winBanner');$('#win').classList.remove('hidden')},700);
+  $('#winBanner').style.display=stage===2?'':'none';
+  setTimeout(function(){if(stage===2)mountBanner('#winBanner');$('#win').classList.remove('hidden')},700);
 }
 
 /* ===== 카메라 ===== */
