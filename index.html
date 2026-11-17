@@ -159,7 +159,6 @@ if(typeof THREE==='undefined'){document.body.insertAdjacentHTML('beforeend','<p 
 var V3=THREE.Vector3,Q=THREE.Quaternion;
 
 /* ===== 쿠팡 파트너스 배너 (다이나믹 배너 코드) ===== */
-var BANNER_HTML='<!DOCTYPE html><html><body style="margin:0;background:transparent"><script src="https://ads-partners.coupang.com/g.js"><\/script><script>new PartnersCoupang.G({"id":1051469,"template":"carousel","trackingCode":"AF4126202","width":"300","height":"250","tsource":""});<\/script></body></html>';
 function mountBanner(sel){
   var box=$(sel);if(!box)return;
   box.innerHTML='';
@@ -167,7 +166,7 @@ function mountBanner(sel){
   f.width=300;f.height=250;f.frameBorder=0;f.scrolling='no';
   f.style.cssText='border:0;background:#fff;border-radius:8px';
   f.setAttribute('referrerpolicy','unsafe-url');
-  f.srcdoc=BANNER_HTML;box.appendChild(f);
+  f.src='banner.html';box.appendChild(f);
 }
 
 /* ===== 키 모양 =====
