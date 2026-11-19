@@ -1,0 +1,282 @@
+<!DOCTYPE html>
+<html lang="ko"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>울타리 퍼즐 10×10 (슬리더링크)</title>
+<style>
+body{margin:0;font-family:-apple-system,"Apple SD Gothic Neo","Noto Sans KR",sans-serif;background:#f6f4ee;color:#222;display:flex;flex-direction:column;align-items:center;padding:12px}
+h1{font-size:20px;margin:6px 0 2px}
+.sub{font-size:13px;color:#666;margin:0 0 8px;text-align:center;line-height:1.5}
+#wrap{width:min(96vw,480px);background:#fff;border-radius:12px;box-shadow:0 2px 10px #0001;padding:6px;touch-action:manipulation}
+svg{width:100%;height:auto;display:block;user-select:none;-webkit-user-select:none}
+#status{margin:10px 0;min-height:22px;font-size:14px;text-align:center}
+#status.win{color:#1f9d55;font-weight:700}
+.bar{display:flex;gap:6px;flex-wrap:wrap;justify-content:center;margin-top:4px}
+button,select{font:inherit;font-size:14px;padding:8px 12px;border-radius:8px;border:1px solid #ccc;background:#fff}
+button:active{background:#eee}
+</style></head><body>
+<h1>울타리 퍼즐 10×10</h1>
+<p class="sub">점 사이를 탭하면 선 → ✕ → 지움 순으로 바뀌어요.<br>숫자 = 그 칸 둘레의 선 개수. 끊김·갈림 없이 큰 고리 하나를 만드세요.</p>
+<div id="wrap"><svg id="board" viewBox="0 0 444 444"></svg></div>
+<div id="status"></div>
+<div class="bar">
+<select id="level"><option value="easy">쉬움</option><option value="normal" selected>보통</option><option value="hard">어려움</option></select>
+<button id="new">새 퍼즐</button><button id="undo">되돌리기</button><button id="reset">처음부터</button><button id="sol">정답 보기</button>
+</div>
+<script>
+// Slitherlink core: generator + solver (N x N cells)
+const N = 10;
+const NV = N + 1;
+const NE = N * NV * 2; // 220
+const H = (r, c) => r * N + c;                 // r 0..N, c 0..N-1
+const V = (r, c) => N * NV + r * NV + c;       // r 0..N-1, c 0..N
+const cellEdges = (r, c) => [H(r, c), H(r + 1, c), V(r, c), V(r, c + 1)];
+const vertEdges = (r, c) => {
+  const e = [];
+  if (c > 0) e.push(H(r, c - 1));
+  if (c < N) e.push(H(r, c));
+  if (r > 0) e.push(V(r - 1, c));
+  if (r < N) e.push(V(r, c));
+  return e;
+};
+const edgeVerts = (e) => {
+  if (e < N * NV) { const r = Math.floor(e / N), c = e % N; return [r * NV + c, r * NV + c + 1]; }
+  const k = e - N * NV, r = Math.floor(k / NV), c = k % NV;
+  return [r * NV + c, (r + 1) * NV + c];
+};
+const CE = [], VE = [], EV = [];
+for (let r = 0; r < N; r++) for (let c = 0; c < N; c++) CE.push(cellEdges(r, c));
+for (let r = 0; r < NV; r++) for (let c = 0; c < NV; c++) VE.push(vertEdges(r, c));
+for (let e = 0; e < NE; e++) EV.push(edgeVerts(e));
+
+function shuffle(a) {
+  for (let i = a.length - 1; i > 0; i--) { const j = Math.floor(Math.random() * (i + 1)); [a[i], a[j]] = [a[j], a[i]]; }
+  return a;
+}
+
+// ---- random single loop from a simply-connected cell region ----
+function randomLoop(minSize, maxSize) {
+  for (let attempt = 0; attempt < 200; attempt++) {
+    const inR = Array.from({ length: N + 2 }, () => new Array(N + 2).fill(false)); // padded
+    const get = (r, c) => inR[r + 1][c + 1];
+    const target = minSize + Math.floor(Math.random() * (maxSize - minSize + 1));
+    let size = 0;
+    const sr = 2 + Math.floor(Math.random() * (N - 4)), sc = 2 + Math.floor(Math.random() * (N - 4));
+    inR[sr + 1][sc + 1] = true; size = 1;
+    const valid = (r, c) => {
+      // pinch check around the 4 vertices (cell already set true)
+      for (const [dr, dc] of [[-1, -1], [-1, 0], [0, -1], [0, 0]]) {
+        const a = get(r + dr, c + dc), b = get(r + dr, c + dc + 1), d = get(r + dr + 1, c + dc), e = get(r + dr + 1, c + dc + 1);
+        if ((a && e && !b && !d) || (b && d && !a && !e)) return false;
+      }
+      // outside connectivity
+      const seen = Array.from({ length: N + 2 }, () => new Array(N + 2).fill(false));
+      const st = [[0, 0]]; seen[0][0] = true; let cnt = 1;
+      while (st.length) {
+        const [y, x] = st.pop();
+        for (const [ny, nx] of [[y + 1, x], [y - 1, x], [y, x + 1], [y, x - 1]]) {
+          if (ny < 0 || nx < 0 || ny > N + 1 || nx > N + 1 || seen[ny][nx] || inR[ny][nx]) continue;
+          seen[ny][nx] = true; cnt++; st.push([ny, nx]);
+        }
+      }
+      return cnt === (N + 2) * (N + 2) - size;
+    };
+    while (size < target) {
+      const cand = [];
+      for (let r = 0; r < N; r++) for (let c = 0; c < N; c++) {
+        if (!get(r, c) && (get(r - 1, c) || get(r + 1, c) || get(r, c - 1) || get(r, c + 1))) cand.push([r, c]);
+      }
+      shuffle(cand);
+      let added = false;
+      for (const [r, c] of cand) {
+        inR[r + 1][c + 1] = true; size++;
+        if (valid(r, c)) { added = true; break; }
+        inR[r + 1][c + 1] = false; size--;
+      }
+      if (!added) break;
+    }
+    if (size < minSize) continue;
+    const sol = new Uint8Array(NE);
+    for (let r = 0; r <= N; r++) for (let c = 0; c < N; c++) if (get(r - 1, c) !== get(r, c)) sol[H(r, c)] = 1;
+    for (let r = 0; r < N; r++) for (let c = 0; c <= N; c++) if (get(r, c - 1) !== get(r, c)) sol[V(r, c)] = 1;
+    return sol;
+  }
+  throw new Error('loop generation failed');
+}
+
+// ---- solver ----
+function propagate(s, clue) {
+  let changed = true;
+  while (changed) {
+    changed = false;
+    for (let i = 0; i < N * N; i++) {
+      const k = clue[i]; if (k < 0) continue;
+      let on = 0, unk = 0; const ce = CE[i];
+      for (let j = 0; j < 4; j++) { const v = s[ce[j]]; if (v === 1) on++; else if (v === 0) unk++; }
+      if (on > k || on + unk < k) return false;
+      if (unk && (on === k || on + unk === k)) {
+        const val = on === k ? 2 : 1;
+        for (let j = 0; j < 4; j++) if (s[ce[j]] === 0) s[ce[j]] = val;
+        changed = true;
+      }
+    }
+    for (let i = 0; i < NV * NV; i++) {
+      let on = 0, unk = 0; const ve = VE[i];
+      for (let j = 0; j < ve.length; j++) { const v = s[ve[j]]; if (v === 1) on++; else if (v === 0) unk++; }
+      if (on > 2) return false;
+      if (on === 2 && unk) { for (const e of ve) if (s[e] === 0) s[e] = 2; changed = true; }
+      else if (on === 1) {
+        if (unk === 0) return false;
+        if (unk === 1) { for (const e of ve) if (s[e] === 0) s[e] = 1; changed = true; }
+      } else if (on === 0 && unk === 1) { for (const e of ve) if (s[e] === 0) s[e] = 2; changed = true; }
+    }
+  }
+  // premature closed loop check
+  let onTotal = 0; for (let e = 0; e < NE; e++) if (s[e] === 1) onTotal++;
+  if (onTotal) {
+    const par = new Int16Array(NV * NV); for (let i = 0; i < par.length; i++) par[i] = i;
+    const find = (x) => { while (par[x] !== x) { par[x] = par[par[x]]; x = par[x]; } return x; };
+    for (let e = 0; e < NE; e++) if (s[e] === 1) { const [a, b] = EV[e]; par[find(a)] = find(b); }
+    // component closed iff every vertex in it has degree 2 (on-edges)
+    const deg = new Int8Array(NV * NV), compEdges = new Map(), compOpen = new Set();
+    for (let e = 0; e < NE; e++) if (s[e] === 1) { const [a, b] = EV[e]; deg[a]++; deg[b]++; }
+    for (let e = 0; e < NE; e++) if (s[e] === 1) { const r = find(EV[e][0]); compEdges.set(r, (compEdges.get(r) || 0) + 1); }
+    for (let v = 0; v < NV * NV; v++) if (deg[v] === 1) compOpen.add(find(v));
+    for (const [r, n] of compEdges) if (!compOpen.has(r) && n !== onTotal) return false;
+  }
+  return true;
+}
+
+function countSolutions(clue, limit = 2, deadline = Infinity) {
+  let found = 0, timedOut = false, sol = null;
+  const rec = (s) => {
+    if (found >= limit || timedOut) return;
+    if (Date.now() > deadline) { timedOut = true; return; }
+    if (!propagate(s, clue)) return;
+    // choose branching edge: adjacent to a vertex with exactly one ON edge, else first unknown
+    let pick = -1;
+    for (let i = 0; i < NV * NV && pick < 0; i++) {
+      const ve = VE[i]; let on = 0, u = -1;
+      for (const e of ve) { if (s[e] === 1) on++; else if (s[e] === 0 && u < 0) u = e; }
+      if (on === 1 && u >= 0) pick = u;
+    }
+    if (pick < 0) for (let e = 0; e < NE; e++) if (s[e] === 0) { pick = e; break; }
+    if (pick < 0) {
+      let on = 0; for (let e = 0; e < NE; e++) if (s[e] === 1) on++;
+      if (on > 0) { found++; if (!sol) sol = s.slice(); }
+      return;
+    }
+    const a = s.slice(); a[pick] = 1; rec(a);
+    const b = s.slice(); b[pick] = 2; rec(b);
+  };
+  rec(new Uint8Array(NE));
+  return { count: found, timedOut, sol };
+}
+
+function clueOf(sol) {
+  const c = new Int8Array(N * N);
+  for (let i = 0; i < N * N; i++) { let k = 0; for (const e of CE[i]) k += sol[e]; c[i] = k; }
+  return c;
+}
+
+// level: 'easy' | 'normal' | 'hard' -> min number of clues kept
+function generatePuzzle(level = 'normal', budgetMs = 4000) {
+  const keepMin = { easy: 60, normal: 46, hard: 0 }[level];
+  const t0 = Date.now();
+  for (;;) {
+    const sol = randomLoop(52, 72);
+    const full = clueOf(sol);
+    if (countSolutions(full, 2).count !== 1) continue;
+    const clue = Int8Array.from(full);
+    let remain = N * N;
+    const order = shuffle([...Array(N * N).keys()]);
+    for (const i of order) {
+      if (remain <= keepMin) break;
+      if (Date.now() - t0 > budgetMs) break;
+      const old = clue[i]; clue[i] = -1;
+      const r = countSolutions(clue, 2, Date.now() + 400);
+      if (r.count === 1 && !r.timedOut) remain--; else clue[i] = old;
+    }
+    return { clue, sol, remain };
+  }
+}
+
+// check a player's edge array (1 = line) against clues; returns {ok, loop}
+function checkPlayer(lines, clue) {
+  let cluesOk = true;
+  const cs = new Array(N * N);
+  for (let i = 0; i < N * N; i++) {
+    let k = 0; for (const e of CE[i]) k += lines[e] === 1 ? 1 : 0;
+    cs[i] = clue[i] < 0 ? 0 : (k === clue[i] ? 1 : (k > clue[i] ? 2 : 0));
+    if (clue[i] >= 0 && k !== clue[i]) cluesOk = false;
+  }
+  const deg = new Int8Array(NV * NV); let total = 0;
+  for (let e = 0; e < NE; e++) if (lines[e] === 1) { deg[EV[e][0]]++; deg[EV[e][1]]++; total++; }
+  let degOk = total > 0;
+  for (let v = 0; v < NV * NV; v++) if (deg[v] !== 0 && deg[v] !== 2) degOk = false;
+  let single = false;
+  if (degOk) {
+    const par = new Int16Array(NV * NV); for (let i = 0; i < par.length; i++) par[i] = i;
+    const find = (x) => { while (par[x] !== x) { par[x] = par[par[x]]; x = par[x]; } return x; };
+    for (let e = 0; e < NE; e++) if (lines[e] === 1) par[find(EV[e][0])] = find(EV[e][1]);
+    const roots = new Set(); for (let e = 0; e < NE; e++) if (lines[e] === 1) roots.add(find(EV[e][0]));
+    single = roots.size === 1;
+  }
+  return { win: cluesOk && degOk && single, cs, deg };
+}
+
+const $ = (id) => document.getElementById(id);
+const svg = $('board'), NS = 'http://www.w3.org/2000/svg', CS = 40, M = 22;
+let puz = null, lines = new Uint8Array(NE), hist = [], showSol = false, won = false;
+const px = (c) => M + c * CS, py = (r) => M + r * CS;
+function el(tag, attrs, parent) { const e = document.createElementNS(NS, tag); for (const k in attrs) e.setAttribute(k, attrs[k]); (parent || svg).appendChild(e); return e; }
+function edgeGeom(e) {
+  if (e < N * (N + 1)) { const r = Math.floor(e / N), c = e % N; return [px(c), py(r), px(c + 1), py(r)]; }
+  const k = e - N * (N + 1), r = Math.floor(k / (N + 1)), c = k % (N + 1); return [px(c), py(r), px(c), py(r + 1)];
+}
+function render() {
+  svg.innerHTML = '';
+  const res = checkPlayer(showSol ? puz.sol : lines, puz.clue);
+  won = !showSol && res.win;
+  const lineColor = showSol ? '#2f7d4f' : (won ? '#1f9d55' : '#1f4fd8');
+  // clue numbers
+  for (let i = 0; i < N * N; i++) {
+    if (puz.clue[i] < 0) continue;
+    const r = Math.floor(i / N), c = i % N;
+    const col = res.cs[i] === 1 ? '#b8b8b8' : res.cs[i] === 2 ? '#d62828' : '#222';
+    const t = el('text', { x: px(c) + CS / 2, y: py(r) + CS / 2 + 1, 'text-anchor': 'middle', 'dominant-baseline': 'central', 'font-size': 22, 'font-weight': 600, fill: col });
+    t.textContent = puz.clue[i];
+  }
+  const src = showSol ? puz.sol : lines;
+  for (let e = 0; e < NE; e++) {
+    const [x1, y1, x2, y2] = edgeGeom(e);
+    if (src[e] === 1) el('line', { x1, y1, x2, y2, stroke: lineColor, 'stroke-width': 6, 'stroke-linecap': 'round' });
+    else if (src[e] === 2) { const mx = (x1 + x2) / 2, my = (y1 + y2) / 2; el('path', { d: `M${mx - 4} ${my - 4}L${mx + 4} ${my + 4}M${mx + 4} ${my - 4}L${mx - 4} ${my + 4}`, stroke: '#c0392b', 'stroke-width': 2, 'stroke-linecap': 'round', opacity: .7 }); }
+  }
+  for (let r = 0; r <= N; r++) for (let c = 0; c <= N; c++) el('circle', { cx: px(c), cy: py(r), r: 3.2, fill: '#444' });
+  if (!showSol) for (let e = 0; e < NE; e++) {
+    const [x1, y1, x2, y2] = edgeGeom(e);
+    const h = el('line', { x1, y1, x2, y2, stroke: 'transparent', 'stroke-width': 22, 'stroke-linecap': 'butt', style: 'cursor:pointer' });
+    h.addEventListener('pointerdown', (ev) => { ev.preventDefault(); toggle(e, ev.button === 2 || ev.shiftKey); });
+    h.addEventListener('contextmenu', (ev) => ev.preventDefault());
+  }
+  $('status').textContent = showSol ? '정답을 보는 중이에요' : won ? '🎉 완성! 하나의 울타리가 이어졌어요' : '숫자 주변에 그 숫자만큼만 선을 그려요';
+  $('status').className = won ? 'win' : '';
+}
+function toggle(e, alt) {
+  hist.push(lines.slice());
+  lines[e] = alt ? (lines[e] === 2 ? 0 : 2) : (lines[e] + 1) % 3;
+  render();
+}
+function newGame() {
+  $('status').textContent = '퍼즐 만드는 중…'; svg.innerHTML = '';
+  setTimeout(() => {
+    puz = generatePuzzle($('level').value); lines = new Uint8Array(NE); hist = []; showSol = false;
+    $('sol').textContent = '정답 보기'; render();
+  }, 30);
+}
+$('new').onclick = newGame;
+$('undo').onclick = () => { if (hist.length && !showSol) { lines = hist.pop(); render(); } };
+$('reset').onclick = () => { hist.push(lines.slice()); lines = new Uint8Array(NE); showSol = false; $('sol').textContent = '정답 보기'; render(); };
+$('sol').onclick = () => { showSol = !showSol; $('sol').textContent = showSol ? '돌아가기' : '정답 보기'; render(); };
+newGame();
+</script></body></html>
